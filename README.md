@@ -6,6 +6,10 @@
 
 A fast, fuzzy window selector for [Kitty](https://sw.kovidgoyal.net/kitty/) terminal. Select windows with `fzf`, preview their content, and move them between tabs with keyboard shortcuts.
 
+## Author's Note
+
+I vibe-coded this entire project without writing a single line of Rust myself. To this day, I still haven't written any Rust code directly. This was a tool I wanted, and I built it in Rust through vibe-coding while on vacation in Thailand—just to see how it would feel. It felt fun. I hope you enjoy using it as much as I've been enjoying it.
+
 ## Features
 
 - **Fuzzy search** across window titles, commands, directories, content, and environment variables
