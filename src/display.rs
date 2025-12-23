@@ -2,7 +2,10 @@ use crate::kitty_api::KittyData;
 use crate::utils;
 use base64::engine::general_purpose::STANDARD as BASE64_STD;
 use base64::Engine;
+use std::collections::HashMap;
 use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
 // ANSI color codes for highlighting
 pub const COLOR_RESET: &str = "\x1b[0m";
@@ -12,6 +15,38 @@ pub const COLOR_META: &str = "\x1b[90m"; // Dim/gray for metadata
 
 /// Build FZF rows from kitty data
 pub fn build_rows(data: &KittyData, self_id: Option<&str>) -> Vec<String> {
+    // First pass: collect all window IDs that need content
+    let mut window_ids = Vec::new();
+
+    for oswin in &data.0 {
+        for tab in &oswin.tabs {
+            for win in &tab.windows {
+                let wid = win.id.to_string();
+
+                // Filter out self window
+                if self_id.is_some() && self_id == Some(wid.as_str()) {
+                    continue;
+                }
+
+                let wtitle = utils::clean(&win.title);
+                let cmdline = join_cmd(win.cmdline());
+
+                // Filter out WINSEL windows
+                if wtitle.to_uppercase() == "WINSEL" || cmdline.to_lowercase().contains("winsel") {
+                    continue;
+                }
+
+                window_ids.push(wid);
+            }
+        }
+    }
+
+    // Fetch all window content in parallel
+    let start = std::time::Instant::now();
+    let window_content_map = fetch_window_content_parallel(&window_ids);
+    utils::log_msg(format!("fetch_window_content_parallel({} windows) took {:?}", window_ids.len(), start.elapsed()));
+
+    // Second pass: build rows with fetched content
     let mut rows = Vec::new();
 
     for oswin in &data.0 {
@@ -54,8 +89,8 @@ pub fn build_rows(data: &KittyData, self_id: Option<&str>) -> Vec<String> {
                 // Build smart label for display
                 let smart_label = build_smart_label(&wtitle, &cmdline, &cwd);
 
-                // Get window content for searching
-                let window_content = get_window_text(&wid).unwrap_or_default();
+                // Get window content from the parallel fetch results
+                let window_content = window_content_map.get(&wid).cloned().unwrap_or_default();
 
                 // Build extra searchable content (will be in separate field)
                 let extra_search = build_extra_searchable_content(&cwd, &window_content, &win.env, &win.user_vars);
@@ -88,6 +123,100 @@ pub fn build_rows(data: &KittyData, self_id: Option<&str>) -> Vec<String> {
 
     rows.sort_by_key(|item| item.0);
     rows.into_iter().map(|(_, line)| line).collect()
+}
+
+/// Fetch window content for multiple windows in parallel
+fn fetch_window_content_parallel(window_ids: &[String]) -> HashMap<String, String> {
+    // Find working socket first
+    let socket = find_working_socket();
+
+    let results = Arc::new(Mutex::new(HashMap::new()));
+    let mut handles = vec![];
+
+    for wid in window_ids {
+        let wid = wid.clone();
+        let socket = socket.clone();
+        let results = Arc::clone(&results);
+
+        let handle = thread::spawn(move || {
+            if let Some(content) = get_window_text_with_socket(&wid, socket.as_deref()) {
+                let mut map = results.lock().unwrap();
+                map.insert(wid, content);
+            }
+        });
+
+        handles.push(handle);
+    }
+
+    // Wait for all threads to complete
+    for handle in handles {
+        let _ = handle.join();
+    }
+
+    Arc::try_unwrap(results).unwrap().into_inner().unwrap()
+}
+
+/// Find a working kitty socket
+fn find_working_socket() -> Option<String> {
+    let candidates = [
+        std::env::var("KITTY_LISTEN_ON").ok(),
+        std::env::var("KITTY_SOCKET").ok(),
+        Some("unix:/tmp/kitty".to_string()),
+        Some("unix:@kitty".to_string()),
+    ];
+
+    for socket in candidates.into_iter().flatten() {
+        if socket.is_empty() {
+            continue;
+        }
+
+        let mut cmd = Command::new("kitty");
+        cmd.args(["@", "--to", &socket, "ls"]);
+
+        if cmd.output().map(|o| o.status.success()).unwrap_or(false) {
+            return Some(socket);
+        }
+    }
+
+    None
+}
+
+/// Get window text content with a specific socket
+fn get_window_text_with_socket(win_id: &str, socket: Option<&str>) -> Option<String> {
+    if win_id.is_empty() {
+        return None;
+    }
+
+    let mut cmd = Command::new("kitty");
+    cmd.arg("@");
+
+    if let Some(s) = socket {
+        cmd.args(["--to", s]);
+    }
+
+    cmd.args(["get-text", "--match", &format!("id:{win_id}"), "--extent=all"]);
+
+    if let Ok(out) = cmd.output() {
+        if out.status.success() {
+            if let Ok(text) = String::from_utf8(out.stdout) {
+                let cleaned = text
+                    .lines()
+                    .map(|line| line.trim())
+                    .filter(|line| !line.is_empty())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+
+                const MAX_LEN: usize = 2000;
+                if cleaned.len() > MAX_LEN {
+                    return Some(cleaned[..MAX_LEN].to_string());
+                } else {
+                    return Some(cleaned);
+                }
+            }
+        }
+    }
+
+    None
 }
 
 /// Join command array into a string, basename the first arg if it's an absolute path
@@ -170,77 +299,6 @@ pub fn build_extra_searchable_content(
     parts.join(" ")
 }
 
-/// Get window text content via kitty API (used for searching)
-pub fn get_window_text(win_id: &str) -> Option<String> {
-    if win_id.is_empty() {
-        return None;
-    }
-
-    // Try multiple kitty sockets
-    let candidates = [
-        std::env::var("KITTY_LISTEN_ON").ok(),
-        std::env::var("KITTY_SOCKET").ok(),
-        Some("unix:/tmp/kitty".to_string()),
-        Some("unix:@kitty".to_string()),
-    ];
-
-    for socket in candidates.into_iter().flatten() {
-        if socket.is_empty() {
-            continue;
-        }
-
-        let mut cmd = Command::new("kitty");
-        cmd.args(["@", "--to", &socket, "get-text", "--match", &format!("id:{win_id}"), "--extent=all"]);
-
-        if let Ok(out) = cmd.output() {
-            if out.status.success() {
-                if let Ok(text) = String::from_utf8(out.stdout) {
-                    // Clean up the text for searching - remove excessive whitespace
-                    let cleaned = text
-                        .lines()
-                        .map(|line| line.trim())
-                        .filter(|line| !line.is_empty())
-                        .collect::<Vec<_>>()
-                        .join(" ");
-
-                    // Limit length to avoid slowing down fzf (keep ~2000 chars)
-                    const MAX_LEN: usize = 2000;
-                    if cleaned.len() > MAX_LEN {
-                        return Some(cleaned[..MAX_LEN].to_string());
-                    } else {
-                        return Some(cleaned);
-                    }
-                }
-            }
-        }
-    }
-
-    // Final fallback: no explicit target
-    let mut cmd = Command::new("kitty");
-    cmd.args(["@", "get-text", "--match", &format!("id:{win_id}"), "--extent=all"]);
-
-    if let Ok(out) = cmd.output() {
-        if out.status.success() {
-            if let Ok(text) = String::from_utf8(out.stdout) {
-                let cleaned = text
-                    .lines()
-                    .map(|line| line.trim())
-                    .filter(|line| !line.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(" ");
-
-                const MAX_LEN: usize = 2000;
-                if cleaned.len() > MAX_LEN {
-                    return Some(cleaned[..MAX_LEN].to_string());
-                } else {
-                    return Some(cleaned);
-                }
-            }
-        }
-    }
-
-    None
-}
 
 #[cfg(test)]
 mod tests {
@@ -390,6 +448,8 @@ mod tests {
                     created_at: 1700000000,
                     last_reported_cmdline: vec!["vim".to_string()],
                     foreground_processes: vec![],
+                    env: HashMap::new(),
+                    user_vars: HashMap::new(),
                 }],
             }],
         }]);
@@ -419,6 +479,8 @@ mod tests {
                         created_at: 1700000000,
                         last_reported_cmdline: vec![],
                         foreground_processes: vec![],
+                        env: HashMap::new(),
+                        user_vars: HashMap::new(),
                     },
                     Window {
                         id: 2,
@@ -428,6 +490,8 @@ mod tests {
                         created_at: 1700000000,
                         last_reported_cmdline: vec!["winsel".to_string()],
                         foreground_processes: vec![],
+                        env: HashMap::new(),
+                        user_vars: HashMap::new(),
                     },
                 ],
             }],
@@ -457,6 +521,8 @@ mod tests {
                     created_at: 1700000000,
                     last_reported_cmdline: vec!["vim".to_string(), "file.txt".to_string()],
                     foreground_processes: vec![],
+                    env: HashMap::new(),
+                    user_vars: HashMap::new(),
                 }],
             }],
         }]);

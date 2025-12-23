@@ -107,7 +107,9 @@ fn run_main() -> Result<(), Box<dyn std::error::Error>> {
         utils::log_msg(format!("origin_tab_id={origin}"));
     }
 
+    let start = std::time::Instant::now();
     let rows = display::build_rows(&data, self_id.as_deref());
+    utils::log_msg(format!("build_rows took {:?}", start.elapsed()));
 
     utils::log_msg(format!("rows={}", rows.len()));
 

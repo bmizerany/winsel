@@ -183,6 +183,8 @@ mod tests {
             foreground_processes: vec![Process {
                 cmdline: vec!["bash".to_string()],
             }],
+            env: HashMap::new(),
+            user_vars: HashMap::new(),
         };
 
         assert_eq!(window.cmdline(), &["vim", "file.txt"]);
@@ -200,6 +202,8 @@ mod tests {
             foreground_processes: vec![Process {
                 cmdline: vec!["bash".to_string()],
             }],
+            env: HashMap::new(),
+            user_vars: HashMap::new(),
         };
 
         assert_eq!(window.cmdline(), &["bash"]);
@@ -215,6 +219,8 @@ mod tests {
             created_at: 0,
             last_reported_cmdline: vec![],
             foreground_processes: vec![],
+            env: HashMap::new(),
+            user_vars: HashMap::new(),
         };
 
         assert_eq!(window.cmdline(), &[] as &[String]);
