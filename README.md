@@ -115,7 +115,6 @@ python server.py
 
 ### Temporary Files
 
-- `/tmp/winsel_rows.txt` - Cached window data for fzf
 - `/tmp/winsel.log` - Debug logging output
 
 ## How It Works

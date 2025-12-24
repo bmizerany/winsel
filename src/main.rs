@@ -144,10 +144,6 @@ fn run_main() -> Result<(), Box<dyn std::error::Error>> {
     let split_v_cmd = "$WINSEL_BIN split-v {+1}";
     let yank_cmd = "$WINSEL_BIN yank {+1}";
 
-    // Write rows to a temp file so we can keep stdin on the TTY (avoids fzf auto-exiting when stdin is not a tty).
-    let tmp_path = "/tmp/winsel_rows.txt";
-    std::fs::write(tmp_path, rows.join("\n"))?;
-
     let mut fzf_cmd = Command::new("fzf");
     fzf_cmd.env("WINSEL_BIN", exe.display().to_string());
     if let Some(ref origin) = origin_tab_id {
@@ -155,7 +151,6 @@ fn run_main() -> Result<(), Box<dyn std::error::Error>> {
     }
     fzf_cmd
         .env("FZF_DEFAULT_OPTS", "")
-        .env("FZF_DEFAULT_COMMAND", format!("cat {tmp_path}"))
         .arg("--prompt=WINSEL> ")
         .arg("--multi")
         .arg("--ansi")
@@ -181,11 +176,16 @@ ctrl-h:execute-silent({split_h_cmd})+accept,\
 ctrl-v:execute-silent({split_v_cmd})+accept,\
 ctrl-y:execute-silent({yank_cmd})"
         ))
-        .stdin(Stdio::inherit())
+        .stdin(Stdio::piped())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit());
 
     let mut child = fzf_cmd.spawn()?;
+
+    // Write rows directly to fzf's stdin (fzf will use /dev/tty for keyboard input)
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin.write_all(rows.join("\n").as_bytes())?;
+    }
 
     utils::log_msg("fzf spawned successfully");
 
