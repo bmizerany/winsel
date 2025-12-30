@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -43,11 +44,20 @@ var bin = func() string {
 // Environment variables
 var (
 	envKittyWindowID = os.Getenv("KITTY_WINDOW_ID")
+	envHome, _       = os.UserHomeDir()
 )
 
-// matchIDs builds a kitty match expression for multiple window IDs.
+// abbrevHome replaces the home directory prefix with ~.
+func abbrevHome(path string) string {
+	if envHome != "" && strings.HasPrefix(path, envHome) {
+		return "~" + strings.TrimPrefix(path, envHome)
+	}
+	return path
+}
+
+// makeMatchQuery builds a kitty match expression for multiple window IDs.
 // e.g. ["1", "2", "3"] -> "id:1 or id:2 or id:3"
-func matchIDs(ids []string) string {
+func makeMatchQuery(ids []string) string {
 	var b strings.Builder
 	for i, id := range ids {
 		if i > 0 {
@@ -65,22 +75,27 @@ func _main() error {
 
 	var kc kitty.Client
 
+	writeList := func(w io.Writer) error {
+		st, err := kc.List(ctx, &kitty.ListParams{
+			Match: "not id:" + envKittyWindowID,
+		})
+		if err != nil {
+			return err
+		}
+		for win := range st.Windows() {
+			fmt.Fprintln(w, strings.Join([]string{
+				strconv.Itoa(win.ID),
+				abbrevHome(win.EffectiveCwd()) + ":",
+				win.Title,
+			}, "\t"))
+		}
+		return nil
+	}
+
 	flag.Parse()
+
 	switch flag.Arg(0) {
 	case "":
-		// Close any existing winsel instances and mark this one
-		go func() {
-			kc.CloseWindow(ctx, "var:winsel")
-			kc.SetUserVars(ctx, &kitty.SetUserVarsParams{
-				Match: "id:" + envKittyWindowID,
-				Var:   []string{"winsel=1"},
-			})
-		}()
-		defer kc.SetUserVars(context.Background(), &kitty.SetUserVarsParams{
-			Match: "id:" + envKittyWindowID,
-			Var:   []string{"winsel"},
-		})
-
 		cmd := exec.CommandContext(ctx, "fzf",
 			// Generate setup
 			"--prompt=WINSEL> ",
@@ -89,7 +104,7 @@ func _main() error {
 			"--layout=reverse",
 			"--border",
 			"--border-label-pos=bottom",
-			"--border-label= ↵:focus b:bg n:here t:tab h:hsplit v:vsplit y:yank x:kill ",
+			"--border-label= ↵:focus ^b:bg ^y:yank ^del:close ",
 
 			// Data format
 			"--delimiter=\t",
@@ -106,13 +121,12 @@ func _main() error {
 
 			// Keybindings
 			"--bind=enter:execute-silent("+bin+" focus {+1})+accept",
-			"--bind=ctrl-b:execute-silent("+bin+" bg {+1})+accept",
-			"--bind=ctrl-n:execute-silent("+bin+" vsplit {+1})+accept",
-			"--bind=ctrl-t:execute-silent("+bin+" tab {+1})+accept",
-			"--bind=ctrl-v:execute-silent("+bin+" vsplit {+1})+accept",
-			"--bind=ctrl-h:execute-silent("+bin+" hsplit {+1})+accept",
+			"--bind=ctrl-b:execute-silent("+bin+" bg {+1})",
 			"--bind=ctrl-y:execute-silent("+bin+" yank {+1})",
-			"--bind=ctrl-x:execute-silent("+bin+" kill {+1})+accept",
+			"--bind=delete:execute-silent("+bin+" close {+1})+reload("+bin+" ls)",
+
+			"--bind=ctrl-o:jump",
+			"--bind=ctrl-l:clear-query",
 		)
 
 		stdin, err := cmd.StdinPipe()
@@ -123,18 +137,9 @@ func _main() error {
 
 		go func() {
 			defer stdin.Close()
-			st, err := kc.List(ctx, &kitty.ListParams{
-				Match: "not id:" + envKittyWindowID,
-			})
-			if err != nil {
-				cancel(err)
-				return
-			}
-			for win := range st.Windows() {
-				fmt.Fprintln(stdin, strings.Join([]string{
-					strconv.Itoa(win.ID),
-					win.Title,
-				}, "\t"))
+			if err := writeList(stdin); err != nil {
+				debugLog.Printf("fzf stdin write error: %v", err)
+				cancel(fmt.Errorf("write list: %w", err))
 			}
 		}()
 
@@ -143,6 +148,8 @@ func _main() error {
 			return fmt.Errorf("fzf failed: %s: %w: %s", cmd, err, out)
 		}
 		return context.Cause(ctx)
+	case "ls":
+		return writeList(os.Stdout)
 	case "preview":
 		match := "id:" + flag.Arg(1)
 		st, err := kc.List(ctx, &kitty.ListParams{Match: match})
@@ -151,7 +158,7 @@ func _main() error {
 		}
 		for win := range st.Windows() {
 			fmt.Printf("Cmd: %s\n", win.Cmdline)
-			fmt.Printf("Dir: %s\n", win.Cwd)
+			fmt.Printf("Dir: %s\n", win.EffectiveCwd())
 			fmt.Printf("Run: %s\n", time.Since(win.CreatedAtTime()).Truncate(time.Second))
 			fmt.Println()
 			break
@@ -202,7 +209,7 @@ func _main() error {
 		}
 		if flag.NArg() > 2 {
 			err = kc.DetachWindow(ctx, &kitty.DetachWindowParams{
-				Match:     matchIDs(flag.Args()[2:]),
+				Match:     makeMatchQuery(flag.Args()[2:]),
 				TargetTab: "id:" + flag.Arg(1),
 			})
 			if err != nil {
@@ -212,100 +219,19 @@ func _main() error {
 		}
 		return kc.FocusWindow(ctx, "id:"+flag.Arg(1))
 	case "bg":
-		debugLog.Printf("bg command: args=%v", flag.Args()[1:])
-		hasBGTab, err := func() (bool, error) {
-			st, err := kc.List(ctx, &kitty.ListParams{
-				MatchTab: "title:^BG$",
-			})
-			if err != nil {
-				// kitty returns error when no tabs match - treat as "no BG tab"
-				if strings.Contains(err.Error(), "No matching") {
-					debugLog.Printf("no BG tab found")
-					return false, nil
-				}
-				debugLog.Printf("list error: %v", err)
-				return false, err
-			}
-			debugLog.Printf("list returned %d os windows", len(st.OSWindows))
-			for range st.Windows() {
-				debugLog.Printf("found BG tab")
-				return true, nil
-			}
-			return false, nil
-		}()
-		if err != nil {
-			return err
-		}
-		debugLog.Printf("hasBGTab=%v", hasBGTab)
-
-		if !hasBGTab {
-			debugLog.Printf("creating BG tab")
-			winID, err := kc.Launch(ctx, &kitty.LaunchParams{
-				Type:     "tab",
-				TabTitle: "BG",
-			})
-			if err != nil {
-				return err
-			}
-			debugLog.Printf("created BG tab with window %s", winID)
-		}
-
-		debugLog.Printf("detaching windows %v to BG tab", flag.Args()[1:])
-		err = kc.DetachWindow(ctx, &kitty.DetachWindowParams{
-			Match:     matchIDs(flag.Args()[1:]),
-			TargetTab: "title:^BG$",
-		})
-		if err != nil {
-			debugLog.Printf("detach error: %v", err)
-			return err
-		}
-		return nil
-	case "tab":
 		if flag.NArg() < 2 {
 			return nil
 		}
-		// Detach all windows to a new tab
-		err := kc.DetachWindow(ctx, &kitty.DetachWindowParams{
-			Match:     "id:" + flag.Arg(1),
-			TargetTab: "new",
+		ids := flag.Args()[1:]
+		return kc.DetachWindow(ctx, &kitty.DetachWindowParams{
+			Match:     makeMatchQuery(ids),
+			TargetTab: "BG",
 		})
-		if err != nil {
-			return err
-		}
-		if flag.NArg() > 2 {
-			err = kc.DetachWindow(ctx, &kitty.DetachWindowParams{
-				Match:     matchIDs(flag.Args()[2:]),
-				TargetTab: "id:" + flag.Arg(1),
-			})
-			if err != nil {
-				return err
-			}
-		}
-		return kc.FocusWindow(ctx, "id:"+flag.Arg(1))
-	case "hsplit", "vsplit":
+	case "close":
 		if flag.NArg() < 2 {
 			return nil
 		}
-		// Detach windows to current tab (adds as splits)
-		err := kc.DetachWindow(ctx, &kitty.DetachWindowParams{
-			Match:     matchIDs(flag.Args()[1:]),
-			TargetTab: "window_id:" + envKittyWindowID,
-		})
-		if err != nil {
-			return err
-		}
-		if err := kc.FocusWindow(ctx, "id:"+flag.Arg(1)); err != nil {
-			return err
-		}
-		// Update tab title to match focused window
-		return kc.SetTabTitle(ctx, &kitty.SetTabTitleParams{
-			Match: "window_id:" + envKittyWindowID,
-		})
-	case "kill":
-		if flag.NArg() < 2 {
-			return nil
-		}
-		return kc.CloseWindow(ctx, matchIDs(flag.Args()[1:]))
+		return kc.CloseWindow(ctx, makeMatchQuery(flag.Args()[1:]))
 	default:
 		return fmt.Errorf("unknown command: %q", flag.Arg(0))
 	}
