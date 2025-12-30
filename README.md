@@ -1,160 +1,81 @@
 # winsel
 
-[![Crates.io](https://img.shields.io/crates/v/winsel?style=flat-square)](https://crates.io/crates/winsel)
-[![License](https://img.shields.io/github/license/bmizerany/winsel?style=flat-square)](LICENSE)
-[![CI](https://img.shields.io/github/actions/workflow/status/bmizerany/winsel/ci.yml?style=flat-square)](https://github.com/bmizerany/winsel/actions)
-
 A fast, fuzzy window selector for [Kitty](https://sw.kovidgoyal.net/kitty/) terminal. Select windows with `fzf`, preview their content, and move them between tabs with keyboard shortcuts.
 
 ## Author's Note
 
-I vibe-coded this entire project without writing a single line of Rust myself. To this day, I still haven't written any Rust code directly. This was a tool I wanted, and I built it in Rust through vibe-coding while on vacation in Thailand—just to see how it would feel. It felt fun. I hope you enjoy using it as much as I've been enjoying it.
+This started as a Rust project I vibe-coded on vacation in Thailand. Then I rewrote it in Go because the Rust version was slow. The Rust code spawned a subprocess for every kitty operation and fetched all window content upfront. The Go version talks directly to kitty's Unix socket and fetches preview content on demand. It's about 600 lines instead of 2000.
 
 ## Features
 
-- **Fuzzy search** across window titles, commands, directories, content, and environment variables
-- **Live preview** with sticky header showing command, directory, and runtime
-- **Multi-select** to move windows into new tabs or splits
-- **Content-aware** - search by anything visible in the terminal output
-- **Environment search** - find windows by env vars (VIRTUAL_ENV, NODE_ENV, etc.)
-- **Fast** - Rust implementation with efficient kitty API usage
+- **Fuzzy search** across window titles and directories
+- **Live preview** with scrollback content and metadata
+- **Multi-select** to group windows into tabs or close in bulk
+- **Fast** - direct socket communication, lazy content loading
 
 ## Requirements
 
 - [Kitty](https://sw.kovidgoyal.net/kitty/) with remote control enabled
-- [fzf](https://github.com/junegunn/fzf) (>= 0.67.0 recommended)
-- Rust toolchain (for building from source)
+- [fzf](https://github.com/junegunn/fzf)
+- Go 1.23+ (for building)
 
 ## Installation
 
-### From source
-
 ```bash
-cargo install --path . --locked
+go install blake.io/winsel@latest
 ```
 
-This installs `winsel` to `~/.cargo/bin/winsel`.
+Or from source:
 
-### Kitty configuration
+```bash
+go build -o ~/go/bin/winsel .
+```
+
+## Kitty configuration
 
 Add to your `kitty.conf`:
 
 ```conf
-# Enable remote control
 allow_remote_control yes
 listen_on unix:/tmp/kitty
 
-# Bind winsel to cmd+k (or your preferred key)
-map cmd+k launch --type=tab --tab-title=WINSEL --cwd=current winsel
+map cmd+k launch --type=overlay --title=WINSEL winsel
 ```
 
 ## Usage
 
-### Basic
+### Keys
 
-- Run `winsel` or press your configured hotkey (e.g., `cmd+k`)
-- Type to filter windows
-- `↵ Enter` - Focus selected window
+- `Enter` - Focus selected window(s); if multiple, group into new tab
+- `^A` - Select all windows
+- `^B` - Move to background tab (creates "BG" tab if needed)
+- `^S` - Split each selected window into its own tab
+- `^Y` - Yank window content to clipboard
+- `^Del` - Close selected window(s)
+- `^O` - Jump mode (type a label to jump to that row)
+- `^L` - Clear the search query
+- `^/` - Toggle preview pane
 - `Esc` - Cancel
-
-### Multi-select
-
-- `Tab` - Select multiple windows
-- `↵ Enter` - Move selections to new tab and focus it
-- `^T` - Move to new tab (always creates new tab)
-- `^Z` - Move to background tab (creates "BG" tab if needed)
-- `^H` - Move to active tab, horizontal split
-- `^V` - Move to active tab, vertical split
-- `^Y` - Yank last command output to clipboard
 
 ### Preview
 
-The preview pane shows:
-- **Command** - Running command line
-- **Directory** - Current working directory
-- **Running** - Uptime (e.g., "5m 30s")
-- **Content** - Last N lines of scrollback (controlled by `FZF_PREVIEW_LINES`, default 200)
+The preview pane shows a sticky header with:
+- **ID** - Window ID
+- **Cmd** - Running command
+- **Dir** - Current directory
+- **Run** - How long the window has been open
 
-The header stays pinned at the top while you scroll the content.
-
-## Searchable Content
-
-winsel searches across multiple sources (in priority order):
-
-1. **Working directory** - Abbreviated path with `~`
-2. **Command line** - Full command with arguments
-3. **Environment variables** - All env vars (name and value)
-4. **User variables** - Kitty user_vars
-5. **Window content** - Up to 2000 characters of visible terminal output
-
-### Examples
-
-```bash
-# Find windows in a virtual environment
-VIRTUAL_ENV
-
-# Find Node.js development windows
-NODE_ENV
-
-# Find windows showing errors
-error 404
-
-# Find windows by directory
-~/src/project
-
-# Find by command
-python server.py
-```
-
-## Configuration
-
-### Environment Variables
-
-- `FZF_PREVIEW_LINES` - Number of scrollback lines to show in preview (default: 200)
-- `KITTY_LISTEN_ON` - Kitty socket location (fallback to `KITTY_SOCKET`, then `unix:/tmp/kitty`)
-
-### Temporary Files
-
-- `/tmp/winsel.log` - Debug logging output
-
-## How It Works
-
-1. **Data Collection** - Queries kitty API for all windows across OS windows and tabs
-2. **Enrichment** - Captures window content, env vars, and metadata
-3. **Display** - Passes data to fzf with two fields:
-   - Field 9: Display (visible in list) - `~/path: command`
-   - Field 10: Search (invisible) - Directory, env vars, user vars, window content
-4. **Preview** - Live preview via `winsel preview-static` with sticky header
-5. **Action** - Executes kitty remote control commands to focus/move windows
-
-## Development
-
-### Building
-
-```bash
-cargo build --release
-```
-
-### Testing
-
-```bash
-cargo test
-```
-
-### Running
-
-```bash
-cargo run
-```
+Below the header is the terminal scrollback with ANSI colors, scrolled to show the most recent output.
 
 ## Architecture
 
-- **`main.rs`** - CLI entry point, fzf orchestration, window operations
-- **`display.rs`** - Row formatting, searchable content generation
-- **`preview.rs`** - Preview generation with sticky header
-- **`kitty_api.rs`** - Type-safe JSON parsing for kitty @ ls output
-- **`kitty_client.rs`** - Kitty remote control client
-- **`utils.rs`** - Path abbreviation, time formatting, logging
+```
+main.go        - CLI, fzf orchestration, window operations
+kitty/client.go - Direct socket client for kitty remote control
+```
+
+The client maintains a connection pool and speaks kitty's escape-sequence
+protocol directly, avoiding the overhead of spawning `kitty @` subprocesses.
 
 ## License
 
