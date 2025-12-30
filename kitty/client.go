@@ -38,21 +38,38 @@ type Tab struct {
 	Windows   []*Window
 }
 
+// ForegroundProcess represents a process running in the foreground of a window.
+type ForegroundProcess struct {
+	Cwd     string   `json:"cwd"`
+	Cmdline []string `json:"cmdline"`
+	Pid     int      `json:"pid"`
+}
+
 // Window represents a window in a tab.
 type Window struct {
-	Tab       *Tab
-	ID        int
-	Cwd       string `json:"cwd"`
-	Title     string `json:"title"`
-	Cmdline   string `json:"last_reported_cmdline"`
-	IsSelf    bool   `json:"is_self"`
-	Vars      Vars   `json:"user_vars"`
-	AtPrompt  bool   `json:"at_prompt"`
-	CreatedAt int64  `json:"created_at"` // Unix nanoseconds
+	Tab                 *Tab
+	ID                  int
+	Cwd                 string               `json:"cwd"`
+	Title               string               `json:"title"`
+	Cmdline             string               `json:"last_reported_cmdline"`
+	IsSelf              bool                 `json:"is_self"`
+	Vars                Vars                 `json:"user_vars"`
+	AtPrompt            bool                 `json:"at_prompt"`
+	CreatedAt           int64                `json:"created_at"` // Unix nanoseconds
+	ForegroundProcesses []*ForegroundProcess `json:"foreground_processes"`
 }
 
 func (w *Window) CreatedAtTime() time.Time {
 	return time.Unix(0, w.CreatedAt)
+}
+
+// EffectiveCwd returns the cwd of the foreground process if available,
+// otherwise falls back to the window's cwd.
+func (w *Window) EffectiveCwd() string {
+	if len(w.ForegroundProcesses) > 0 && w.ForegroundProcesses[0].Cwd != "" {
+		return w.ForegroundProcesses[0].Cwd
+	}
+	return w.Cwd
 }
 
 type State struct {
