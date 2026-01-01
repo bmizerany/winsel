@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -146,6 +147,11 @@ func _main() error {
 
 		out, err := cmd.CombinedOutput()
 		if err != nil {
+			var exitErr *exec.ExitError
+			if errors.As(err, &exitErr) && exitErr.ExitCode() == 130 {
+				// ESC or Ctrl-C pressed; normal exit
+				return nil
+			}
 			return fmt.Errorf("fzf failed: %s: %w: %s", cmd, err, out)
 		}
 		return context.Cause(ctx)
