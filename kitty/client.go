@@ -189,6 +189,7 @@ func (c *Client) SetTabTitle(ctx context.Context, p *SetTabTitleParams) error {
 type DetachWindowParams struct {
 	Match     string `json:"match,omitempty"`
 	TargetTab string `json:"target_tab,omitempty"`
+	TabTitle  string `json:"tab_title,omitempty"`
 }
 
 func (c *Client) DetachWindow(ctx context.Context, p *DetachWindowParams) error {
