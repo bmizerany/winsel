@@ -55,9 +55,9 @@ func abbrevHome(path string) string {
 	return path
 }
 
-// makeMatchQuery builds a kitty match expression for multiple window IDs.
+// makeMatchIDsQuery builds a kitty match expression for multiple window IDs.
 // e.g. ["1", "2", "3"] -> "id:1 or id:2 or id:3"
-func makeMatchQuery(ids []string) string {
+func makeMatchIDsQuery(ids []string) string {
 	var b strings.Builder
 	for i, id := range ids {
 		if i > 0 {
@@ -116,17 +116,18 @@ func _main() error {
 			"--info=right",
 
 			// Preview window
-			"--preview="+bin+" preview {1}",
+			"--preview="+bin+" show {1}",
 			"--preview-window=right:60%,nowrap,follow,~4",
 
 			// Keybindings
 			"--bind=enter:execute-silent("+bin+" focus {+1})+accept",
 			"--bind=ctrl-b:execute-silent("+bin+" bg {+1})",
 			"--bind=ctrl-y:execute-silent("+bin+" yank {+1})",
-			"--bind=delete:execute-silent("+bin+" close {+1})+reload("+bin+" ls)",
+			"--bind=ctrl-delete:execute-silent("+bin+" close {+1})+reload("+bin+" ls)",
 
 			"--bind=ctrl-o:jump",
 			"--bind=ctrl-l:clear-query",
+			"--bind=ctrl-/:toggle-preview",
 		)
 
 		stdin, err := cmd.StdinPipe()
@@ -150,7 +151,7 @@ func _main() error {
 		return context.Cause(ctx)
 	case "ls":
 		return writeList(os.Stdout)
-	case "preview":
+	case "show":
 		match := "id:" + flag.Arg(1)
 		st, err := kc.List(ctx, &kitty.ListParams{Match: match})
 		if err != nil {
@@ -187,6 +188,7 @@ func _main() error {
 			}
 			texts = append(texts, text)
 		}
+		// TODO(bmizerany): use some universal clipboard library instead of pbcopy
 		pbcopy := exec.CommandContext(ctx, "pbcopy")
 		pbcopy.Stdin = strings.NewReader(strings.Join(texts, "\n"))
 		return pbcopy.Run()
@@ -209,7 +211,7 @@ func _main() error {
 		}
 		if flag.NArg() > 2 {
 			err = kc.DetachWindow(ctx, &kitty.DetachWindowParams{
-				Match:     makeMatchQuery(flag.Args()[2:]),
+				Match:     makeMatchIDsQuery(flag.Args()[2:]),
 				TargetTab: "id:" + flag.Arg(1),
 			})
 			if err != nil {
@@ -222,16 +224,15 @@ func _main() error {
 		if flag.NArg() < 2 {
 			return nil
 		}
-		ids := flag.Args()[1:]
 		return kc.DetachWindow(ctx, &kitty.DetachWindowParams{
-			Match:     makeMatchQuery(ids),
-			TargetTab: "BG",
+			Match:     makeMatchIDsQuery(flag.Args()[1:]),
+			TargetTab: "title:BG",
 		})
 	case "close":
 		if flag.NArg() < 2 {
 			return nil
 		}
-		return kc.CloseWindow(ctx, makeMatchQuery(flag.Args()[1:]))
+		return kc.CloseWindow(ctx, makeMatchIDsQuery(flag.Args()[1:]))
 	default:
 		return fmt.Errorf("unknown command: %q", flag.Arg(0))
 	}
