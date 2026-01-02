@@ -86,6 +86,7 @@ func _main() error {
 		for win := range st.Windows() {
 			fmt.Fprintln(w, strings.Join([]string{
 				strconv.Itoa(win.ID),
+				strconv.Itoa(win.Tab.ID) + "." + strconv.Itoa(win.ID) + ":",
 				abbrevHome(win.EffectiveCwd()) + ":",
 				win.Title,
 			}, "\t"))
@@ -109,7 +110,7 @@ func _main() error {
 
 			// Data format
 			"--delimiter=\t",
-			"--with-nth=2,3",
+			"--with-nth=2,3,4",
 			"--accept-nth=1",
 
 			"--no-select-1",

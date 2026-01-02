@@ -77,11 +77,13 @@ type State struct {
 }
 
 // Windows returns a flattened sequence of all windows in s.
+// Each window's Tab field is set to its containing tab.
 func (s *State) Windows() iter.Seq[*Window] {
 	return func(yield func(*Window) bool) {
 		for _, o := range s.OSWindows {
 			for _, tab := range o.Tabs {
 				for _, win := range tab.Windows {
+					win.Tab = tab
 					if !yield(win) {
 						return
 					}
