@@ -47,15 +47,15 @@ map cmd+k launch --type=overlay --title=WINSEL winsel
 ### Keys
 
 - `Enter` - Focus selected window(s); if multiple, group into new tab
-- `^A` - Select all windows
-- `^B` - Move to background tab (creates "BG" tab if needed)
-- `^S` - Split each selected window into its own tab
-- `^Y` - Yank window content to clipboard
-- `^Del` - Close selected window(s)
-- `^O` - Jump mode (type a label to jump to that row)
-- `^L` - Clear the search query
+- `^a` - Select all windows
+- `^b` - Move to background tab (creates "BG" tab if needed)
+- `^s` - Split each selected window into its own tab
+- `^y` - Yank window content to clipboard
+- `^del` - Close selected window(s)
+- `^o` - Jump mode (type a label to jump to that row)
+- `^l` - Clear the search query
 - `^/` - Toggle preview pane
-- `Esc` - Cancel
+- `esc` - Cancel
 
 ### Preview
 

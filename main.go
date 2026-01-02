@@ -105,7 +105,7 @@ func _main() error {
 			"--layout=reverse",
 			"--border",
 			"--border-label-pos=bottom",
-			"--border-label= ↵:focus ^a:all ^b:bg ^y:yank ^del:close ^o:jump ^l:clear ^/:preview ",
+			"--border-label= ↵:focus ^a:all ^b:bg ^s:split ^y:yank ^del:close ^o:jump ^l:clear ^/:preview ",
 
 			// Data format
 			"--delimiter=\t",
@@ -118,13 +118,14 @@ func _main() error {
 
 			// Preview window
 			"--preview="+bin+" show {1}",
-			"--preview-window=right:60%,nowrap,follow,~4",
+			"--preview-window=right:60%:nowrap:~5:follow",
 
 			// Keybindings
 			"--bind=enter:execute-silent("+bin+" focus {+1})+accept",
 			"--bind=ctrl-b:execute-silent("+bin+" bg {+1})",
 			"--bind=ctrl-y:execute-silent("+bin+" yank {+1})",
 			"--bind=ctrl-delete:execute-silent("+bin+" close {+1})+reload("+bin+" ls)",
+			"--bind=ctrl-s:execute-silent("+bin+" split {+1})+accept",
 
 			"--bind=ctrl-a:select-all",
 			"--bind=ctrl-o:jump",
@@ -165,6 +166,7 @@ func _main() error {
 			return err
 		}
 		for win := range st.Windows() {
+			fmt.Printf("ID: %d\n", win.ID)
 			fmt.Printf("Cmd: %s\n", win.Cmdline)
 			fmt.Printf("Dir: %s\n", win.EffectiveCwd())
 			fmt.Printf("Run: %s\n", time.Since(win.CreatedAtTime()).Truncate(time.Second))
@@ -235,6 +237,20 @@ func _main() error {
 			Match:     makeMatchIDsQuery(flag.Args()[1:]),
 			TargetTab: "title:BG",
 		})
+	case "split":
+		if flag.NArg() < 2 {
+			return nil
+		}
+		for _, winID := range flag.Args()[1:] {
+			err := kc.DetachWindow(ctx, &kitty.DetachWindowParams{
+				Match:     "id:" + winID,
+				TargetTab: "new",
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	case "close":
 		if flag.NArg() < 2 {
 			return nil
