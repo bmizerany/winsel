@@ -105,7 +105,7 @@ func _main() error {
 			"--layout=reverse",
 			"--border",
 			"--border-label-pos=bottom",
-			"--border-label= ↵:focus ^b:bg ^y:yank ^del:close ",
+			"--border-label= ↵:focus ^a:all ^b:bg ^y:yank ^del:close ^o:jump ^l:clear ^/:preview ",
 
 			// Data format
 			"--delimiter=\t",
@@ -126,6 +126,7 @@ func _main() error {
 			"--bind=ctrl-y:execute-silent("+bin+" yank {+1})",
 			"--bind=ctrl-delete:execute-silent("+bin+" close {+1})+reload("+bin+" ls)",
 
+			"--bind=ctrl-a:select-all",
 			"--bind=ctrl-o:jump",
 			"--bind=ctrl-l:clear-query",
 			"--bind=ctrl-/:toggle-preview",
