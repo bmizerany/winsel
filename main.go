@@ -108,12 +108,12 @@ func _main() error {
 				cmd = strings.Join(last.Cmdline, " ")
 			}
 
-			// Format: OS_LETTER:TAB_ID:WIN_ID (e.g., "A:105:233")
-			winID := fmt.Sprintf("%s:%d:%d",
+			// Format: OS_LETTER:TAB_ID:WIN_ID (e.g., "A:105:233"), padded for alignment
+			winID := fmt.Sprintf("%-10s", fmt.Sprintf("%s:%d:%d",
 				oswinLetter[win.OSWindow.ID],
 				win.Tab.ID,
 				win.ID,
-			)
+			))
 
 			fmt.Fprintln(w, strings.Join([]string{
 				strconv.Itoa(win.ID),
