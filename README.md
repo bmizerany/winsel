@@ -2,10 +2,6 @@
 
 A fast, fuzzy window selector for [Kitty](https://sw.kovidgoyal.net/kitty/) terminal. Select windows with `fzf`, preview their content, and move them between tabs with keyboard shortcuts.
 
-## Author's Note
-
-This started as a Rust project I vibe-coded on vacation in Thailand. Then I rewrote it in Go because the Rust version was slow. The Rust code spawned a subprocess for every kitty operation and fetched all window content upfront. The Go version talks directly to kitty's Unix socket and fetches preview content on demand. It's about 600 lines instead of 2000.
-
 ## Features
 
 - **Fuzzy search** across window titles and directories
@@ -51,7 +47,7 @@ map cmd+k launch --type=overlay --title=WINSEL winsel
 - `^b` - Move to background tab (creates "BG" tab if needed)
 - `^s` - Split each selected window into its own tab
 - `^y` - Yank window content to clipboard
-- `^del` - Close selected window(s)
+- `^c` - Close selected window(s)
 - `^o` - Jump mode (type a label to jump to that row)
 - `^l` - Clear the search query
 - `^/` - Toggle preview pane
@@ -60,10 +56,9 @@ map cmd+k launch --type=overlay --title=WINSEL winsel
 ### Preview
 
 The preview pane shows a sticky header with:
-- **ID** - Window ID
-- **Cmd** - Running command
+- **ID** - Window identifier (OS_LETTER:TAB_ID:WIN_ID)
 - **Dir** - Current directory
-- **Run** - How long the window has been open
+- **Cmd** - Running command
 
 Below the header is the terminal scrollback with ANSI colors, scrolled to show the most recent output.
 
