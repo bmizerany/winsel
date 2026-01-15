@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"blake.io/winsel/kitty"
 )
@@ -83,12 +82,45 @@ func _main() error {
 		if err != nil {
 			return err
 		}
+
+		// Build OS Window ID to letter mapping (A, B, C, ...)
+		// Letter is derived from OS Window ID so it's stable for the window's lifetime
+		oswinLetter := make(map[int]string)
+		for _, osw := range st.OSWindows {
+			oswinLetter[osw.ID] = string(rune('A' + (osw.ID % 26)))
+		}
+
 		for win := range st.Windows() {
+			cwd := abbrevHome(win.EffectiveCwd())
+
+			// Only show title if different from cwd
+			title := win.Title
+			if title == cwd || title == win.EffectiveCwd() {
+				title = ""
+			}
+
+			// Determine the main command:
+			// 1. Use win.Cmdline if available (last reported command)
+			// 2. Otherwise use the last ForegroundProcess (typically the parent/main command)
+			cmd := win.Cmdline
+			if cmd == "" && len(win.ForegroundProcesses) > 0 {
+				last := win.ForegroundProcesses[len(win.ForegroundProcesses)-1]
+				cmd = strings.Join(last.Cmdline, " ")
+			}
+
+			// Format: OS_LETTER:TAB_ID:WIN_ID (e.g., "A:105:233")
+			winID := fmt.Sprintf("%s:%d:%d",
+				oswinLetter[win.OSWindow.ID],
+				win.Tab.ID,
+				win.ID,
+			)
+
 			fmt.Fprintln(w, strings.Join([]string{
 				strconv.Itoa(win.ID),
-				strconv.Itoa(win.Tab.ID) + "." + strconv.Itoa(win.ID) + ":",
-				abbrevHome(win.EffectiveCwd()) + ":",
-				win.Title,
+				winID,
+				cwd,
+				title,
+				cmd,
 			}, "\t"))
 		}
 		return nil
@@ -106,11 +138,11 @@ func _main() error {
 			"--layout=reverse",
 			"--border",
 			"--border-label-pos=bottom",
-			"--border-label= ↵:focus ^a:all ^b:bg ^s:split ^y:yank ^del:close ^o:jump ^l:clear ^/:preview ",
+			"--border-label= ↵:focus ^a:all ^b:bg ^s:split ^y:yank ^c:close ^o:jump ^l:clear ^/:preview ",
 
 			// Data format
 			"--delimiter=\t",
-			"--with-nth=2,3,4",
+			"--with-nth=2,3,4,5",
 			"--accept-nth=1",
 
 			"--no-select-1",
@@ -123,9 +155,9 @@ func _main() error {
 
 			// Keybindings
 			"--bind=enter:execute-silent("+bin+" focus {+1})+accept",
-			"--bind=ctrl-b:execute-silent("+bin+" bg {+1})",
+			"--bind=ctrl-b:execute-silent("+bin+" bg {+1})+reload("+bin+" ls)",
 			"--bind=ctrl-y:execute-silent("+bin+" yank {+1})",
-			"--bind=ctrl-delete:execute-silent("+bin+" close {+1})+reload("+bin+" ls)",
+			"--bind=ctrl-c:execute-silent("+bin+" close {+1})+reload("+bin+" ls)",
 			"--bind=ctrl-s:execute-silent("+bin+" split {+1})+accept",
 
 			"--bind=ctrl-a:select-all",
@@ -167,10 +199,10 @@ func _main() error {
 			return err
 		}
 		for win := range st.Windows() {
-			fmt.Printf("ID: %d\n", win.ID)
+			osLetter := string(rune('A' + (win.OSWindow.ID % 26)))
+			fmt.Printf("ID: %s:%d:%d\n", osLetter, win.Tab.ID, win.ID)
+			fmt.Printf("Dir: %s\n", abbrevHome(win.EffectiveCwd()))
 			fmt.Printf("Cmd: %s\n", win.Cmdline)
-			fmt.Printf("Dir: %s\n", win.EffectiveCwd())
-			fmt.Printf("Run: %s\n", time.Since(win.CreatedAtTime()).Truncate(time.Second))
 			fmt.Println()
 			break
 		}
@@ -231,13 +263,43 @@ func _main() error {
 		}
 		return kc.FocusWindow(ctx, "id:"+flag.Arg(1))
 	case "bg":
+		debugLog.Printf("bg: args=%v", flag.Args()[1:])
 		if flag.NArg() < 2 {
+			debugLog.Printf("bg: no windows selected, returning")
 			return nil
 		}
-		return kc.DetachWindow(ctx, &kitty.DetachWindowParams{
-			Match:     makeMatchIDsQuery(flag.Args()[1:]),
-			TargetTab: "title:BG",
-		})
+		// Check if a "BG" tab already exists (list all, can't filter since
+		// kitty errors when no tabs match)
+		st, err := kc.List(ctx, nil)
+		if err != nil {
+			debugLog.Printf("bg: list error: %v", err)
+			return err
+		}
+		var bgTabID int
+		for _, osw := range st.OSWindows {
+			for _, tab := range osw.Tabs {
+				if tab.Title == "BG" {
+					bgTabID = tab.ID
+					break
+				}
+			}
+			if bgTabID != 0 {
+				break
+			}
+		}
+		p := &kitty.DetachWindowParams{
+			Match: makeMatchIDsQuery(flag.Args()[1:]),
+		}
+		if bgTabID != 0 {
+			debugLog.Printf("bg: found BG tab id=%d", bgTabID)
+			p.TargetTab = "id:" + strconv.Itoa(bgTabID)
+		} else {
+			debugLog.Printf("bg: creating new BG tab")
+			p.TargetTab = "new"
+			p.TabTitle = "BG"
+		}
+		debugLog.Printf("bg: detaching match=%s to target=%s", p.Match, p.TargetTab)
+		return kc.DetachWindow(ctx, p)
 	case "split":
 		if flag.NArg() < 2 {
 			return nil
