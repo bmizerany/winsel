@@ -47,7 +47,8 @@ type ForegroundProcess struct {
 
 // Window represents a window in a tab.
 type Window struct {
-	Tab                 *Tab
+	OSWindow            *OSWindow `json:"-"`
+	Tab                 *Tab      `json:"-"`
 	ID                  int
 	Cwd                 string               `json:"cwd"`
 	Title               string               `json:"title"`
@@ -77,12 +78,13 @@ type State struct {
 }
 
 // Windows returns a flattened sequence of all windows in s.
-// Each window's Tab field is set to its containing tab.
+// Each window's Tab and OSWindow fields are set to their containing structures.
 func (s *State) Windows() iter.Seq[*Window] {
 	return func(yield func(*Window) bool) {
 		for _, o := range s.OSWindows {
 			for _, tab := range o.Tabs {
 				for _, win := range tab.Windows {
+					win.OSWindow = o
 					win.Tab = tab
 					if !yield(win) {
 						return
@@ -146,8 +148,9 @@ type matchParam struct {
 }
 
 type ListParams struct {
-	Match    string `json:"match,omitempty"`
-	MatchTab string `json:"match_tab,omitempty"`
+	Match         string `json:"match,omitempty"`
+	MatchTab      string `json:"match_tab,omitempty"`
+	IgnoreNoMatch bool   `json:"ignore_no_match,omitempty"`
 }
 
 func (c *Client) List(ctx context.Context, p *ListParams) (*State, error) {
