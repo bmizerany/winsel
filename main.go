@@ -108,8 +108,14 @@ func _main() error {
 				cmd = strings.Join(last.Cmdline, " ")
 			}
 
-			// Format: OS_LETTER:TAB_ID:WIN_ID (e.g., "A:105:233"), padded for alignment
-			winID := fmt.Sprintf("%-10s", fmt.Sprintf("%s:%d:%d",
+			tag := "   "
+			if win.Vars.Get("winsel") == "true" {
+				tag = "[T]"
+			}
+
+			// Format: [T] OS_LETTER:TAB_ID:WIN_ID (e.g., "[T] A:105:233"), padded for alignment
+			winID := fmt.Sprintf("%-14s", fmt.Sprintf("%s %s:%d:%d",
+				tag,
 				oswinLetter[win.OSWindow.ID],
 				win.Tab.ID,
 				win.ID,
@@ -138,7 +144,7 @@ func _main() error {
 			"--layout=reverse",
 			"--border",
 			"--border-label-pos=bottom",
-			"--border-label= ↵:focus ^a:all ^b:bg ^s:split ^y:yank ^c:close ^o:jump ^l:clear ^/:preview ",
+			"--border-label= ↵:focus ^a:all ^b:bg ^s:split ^t:tag ^y:yank ^c:close ^o:jump ^l:clear ^/:preview ",
 
 			// Data format
 			"--delimiter=\t",
@@ -159,6 +165,7 @@ func _main() error {
 			"--bind=ctrl-y:execute-silent("+bin+" yank {+1})",
 			"--bind=ctrl-c:execute-silent("+bin+" close {+1})+reload("+bin+" ls)",
 			"--bind=ctrl-s:execute-silent("+bin+" split {+1})+accept",
+			"--bind=ctrl-t:execute-silent("+bin+" tag {+1})+reload("+bin+" ls)",
 
 			"--bind=ctrl-a:select-all",
 			"--bind=ctrl-o:jump",
@@ -308,6 +315,45 @@ func _main() error {
 			err := kc.DetachWindow(ctx, &kitty.DetachWindowParams{
 				Match:     "id:" + winID,
 				TargetTab: "new",
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	case "tag":
+		if flag.NArg() < 2 {
+			return nil
+		}
+		st, err := kc.List(ctx, &kitty.ListParams{
+			Match: makeMatchIDsQuery(flag.Args()[1:]),
+		})
+		if err != nil {
+			return err
+		}
+		var toTag []string
+		var toUntag []string
+		for win := range st.Windows() {
+			if win.Vars.Get("winsel") == "true" {
+				toUntag = append(toUntag, strconv.Itoa(win.ID))
+				continue
+			}
+			toTag = append(toTag, strconv.Itoa(win.ID))
+		}
+
+		if len(toTag) > 0 {
+			err = kc.SetUserVars(ctx, &kitty.SetUserVarsParams{
+				Match: makeMatchIDsQuery(toTag),
+				Var:   []string{"winsel=true"},
+			})
+			if err != nil {
+				return err
+			}
+		}
+		if len(toUntag) > 0 {
+			err = kc.SetUserVars(ctx, &kitty.SetUserVarsParams{
+				Match: makeMatchIDsQuery(toUntag),
+				Var:   []string{"winsel"},
 			})
 			if err != nil {
 				return err
