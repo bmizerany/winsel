@@ -225,6 +225,34 @@ func (c *Client) GetText(ctx context.Context, match string, p *GetTextParams) (s
 	return send[string](ctx, c, "get-text", payload{match, p})
 }
 
+type SendTextParams struct {
+	Data           string `json:"data,omitempty"`
+	Match          string `json:"match,omitempty"`
+	MatchTab       string `json:"match_tab,omitempty"`
+	All            bool   `json:"all,omitempty"`
+	ExcludeActive  bool   `json:"exclude_active,omitempty"`
+	SessionID      string `json:"session_id,omitempty"`
+	BracketedPaste string `json:"bracketed_paste,omitempty"`
+}
+
+func (c *Client) SendText(ctx context.Context, p *SendTextParams) error {
+	_, err := send[noResponse](ctx, c, "send-text", p)
+	return err
+}
+
+type SendKeyParams struct {
+	Keys          []string `json:"keys,omitempty"`
+	Match         string   `json:"match,omitempty"`
+	MatchTab      string   `json:"match_tab,omitempty"`
+	All           bool     `json:"all,omitempty"`
+	ExcludeActive bool     `json:"exclude_active,omitempty"`
+}
+
+func (c *Client) SendKey(ctx context.Context, p *SendKeyParams) error {
+	_, err := send[noResponse](ctx, c, "send-key", p)
+	return err
+}
+
 type noResponse struct{}
 
 // send is the Go version of:

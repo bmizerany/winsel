@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -67,6 +68,48 @@ func makeMatchIDsQuery(ids []string) string {
 		b.WriteString(id)
 	}
 	return b.String()
+}
+
+func askBroadcastText(ctx context.Context) (string, error) {
+	ask := exec.CommandContext(ctx, "kitty", "+kitten", "ask",
+		"--type=line",
+		"--name=winsel-broadcast",
+		"--message=Broadcast text to selected windows",
+		"--prompt=Broadcast> ",
+	)
+	ask.Stdin = os.Stdin
+	ask.Stderr = os.Stderr
+
+	out, err := ask.Output()
+	if err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			switch exitErr.ExitCode() {
+			case 1, 130:
+				return "", nil
+			}
+		}
+		return "", err
+	}
+
+	raw := strings.TrimSpace(string(out))
+	if raw == "" {
+		return "", nil
+	}
+
+	var resp struct {
+		Response string `json:"response"`
+	}
+	if err := json.Unmarshal([]byte(raw), &resp); err == nil && resp.Response != "" {
+		return resp.Response, nil
+	}
+	if i := strings.IndexByte(raw, '{'); i >= 0 {
+		if err := json.Unmarshal([]byte(raw[i:]), &resp); err == nil && resp.Response != "" {
+			return resp.Response, nil
+		}
+	}
+
+	return raw, nil
 }
 
 func _main() error {
@@ -144,7 +187,7 @@ func _main() error {
 			"--layout=reverse",
 			"--border",
 			"--border-label-pos=bottom",
-			"--border-label= ↵:focus ^a:all ^b:bg ^s:split ^t:tag ^y:yank ^c:close ^o:jump ^l:clear ^/:preview ",
+			"--border-label= ↵:focus ^a:all ^b:bg ^g:broadcast ^s:split ^t:tag ^y:yank ^c:close ^o:jump ^l:clear ^/:preview ",
 
 			// Data format
 			"--delimiter=\t",
@@ -162,6 +205,7 @@ func _main() error {
 			// Keybindings
 			"--bind=enter:execute-silent("+bin+" focus {+1})+accept",
 			"--bind=ctrl-b:execute-silent("+bin+" bg {+1})+reload("+bin+" ls)",
+			"--bind=ctrl-g:execute("+bin+" broadcast {+1})",
 			"--bind=ctrl-y:execute-silent("+bin+" yank {+1})",
 			"--bind=ctrl-c:execute-silent("+bin+" close {+1})+reload("+bin+" ls)",
 			"--bind=ctrl-s:execute-silent("+bin+" split {+1})+accept",
@@ -241,6 +285,30 @@ func _main() error {
 		pbcopy := exec.CommandContext(ctx, "pbcopy")
 		pbcopy.Stdin = strings.NewReader(strings.Join(texts, "\n"))
 		return pbcopy.Run()
+	case "broadcast":
+		if flag.NArg() < 2 {
+			return nil
+		}
+		text, err := askBroadcastText(ctx)
+		if err != nil {
+			return err
+		}
+		if text == "" {
+			return nil
+		}
+		match := makeMatchIDsQuery(flag.Args()[1:])
+		err = kc.SendText(ctx, &kitty.SendTextParams{
+			Match:          match,
+			Data:           "text:" + text,
+			BracketedPaste: "auto",
+		})
+		if err != nil {
+			return err
+		}
+		return kc.SendKey(ctx, &kitty.SendKeyParams{
+			Match: match,
+			Keys:  []string{"enter"},
+		})
 	case "focus":
 		if flag.NArg() < 2 {
 			return nil
